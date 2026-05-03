@@ -1,3 +1,5 @@
+import { buildCacheKey, getCachedPrice, setCachedPrice } from "@/lib/sourcing/priceCache"
+
 export class PriceChartingConfigError extends Error {
   constructor() {
     super("PriceCharting API key is not configured. See docs/SETUP.md → PriceCharting API.")
@@ -31,12 +33,13 @@ export interface PriceChartingPrices {
   gradePrices: Record<string, number>
 }
 
+// In-memory cache as a fast path within the same server instance
 interface CacheEntry<T> {
   value: T
   expiresAt: number
 }
 
-const CACHE_TTL_MS = 12 * 60 * 60 * 1000
+const MEMORY_TTL_MS = 12 * 60 * 60 * 1000
 
 const searchCache = new Map<string, CacheEntry<PriceChartingProduct | null>>()
 const productCache = new Map<string, CacheEntry<PriceChartingPrices | null>>()
@@ -52,22 +55,22 @@ function getApiKey(): string {
   return key
 }
 
-export async function searchCard(
+async function searchCard(
   cardName: string,
   setName?: string
 ): Promise<PriceChartingProduct | null> {
   const apiKey = getApiKey()
   const cacheKey = `${cardName}:${setName ?? ""}`
 
-  const cached = searchCache.get(cacheKey)
-  if (cached && Date.now() < cached.expiresAt) return cached.value
+  const mem = searchCache.get(cacheKey)
+  if (mem && Date.now() < mem.expiresAt) return mem.value
 
   const query = setName ? `${cardName} ${setName}` : cardName
   const url = `https://www.pricecharting.com/api/products?q=${encodeURIComponent(query)}&id=${apiKey}`
 
   const res = await fetch(url)
   if (!res.ok) {
-    searchCache.set(cacheKey, { value: null, expiresAt: Date.now() + CACHE_TTL_MS })
+    searchCache.set(cacheKey, { value: null, expiresAt: Date.now() + MEMORY_TTL_MS })
     return null
   }
 
@@ -75,21 +78,21 @@ export async function searchCard(
   const products: PriceChartingProduct[] = data.products ?? []
   const result = products[0] ?? null
 
-  searchCache.set(cacheKey, { value: result, expiresAt: Date.now() + CACHE_TTL_MS })
+  searchCache.set(cacheKey, { value: result, expiresAt: Date.now() + MEMORY_TTL_MS })
   return result
 }
 
-export async function getProductPrices(productId: string): Promise<PriceChartingPrices | null> {
+async function getProductPrices(productId: string): Promise<PriceChartingPrices | null> {
   const apiKey = getApiKey()
 
-  const cached = productCache.get(productId)
-  if (cached && Date.now() < cached.expiresAt) return cached.value
+  const mem = productCache.get(productId)
+  if (mem && Date.now() < mem.expiresAt) return mem.value
 
   const url = `https://www.pricecharting.com/api/product?id=${productId}&api_key=${apiKey}`
   const res = await fetch(url)
 
   if (!res.ok) {
-    productCache.set(productId, { value: null, expiresAt: Date.now() + CACHE_TTL_MS })
+    productCache.set(productId, { value: null, expiresAt: Date.now() + MEMORY_TTL_MS })
     return null
   }
 
@@ -113,7 +116,7 @@ export async function getProductPrices(productId: string): Promise<PriceCharting
     gradePrices,
   }
 
-  productCache.set(productId, { value: result, expiresAt: Date.now() + CACHE_TTL_MS })
+  productCache.set(productId, { value: result, expiresAt: Date.now() + MEMORY_TTL_MS })
   return result
 }
 
@@ -126,24 +129,43 @@ export async function getCardPrice(
     grade?: string
   } = {}
 ): Promise<{ price: number | null; productId: string | null }> {
+  const cardKey = buildCacheKey(cardName, options)
+
+  // Check DB cache first (survives server restarts)
+  const cached = await getCachedPrice(cardKey, "pricecharting")
+  if (cached !== null) {
+    const raw = cached.rawData as { price: number | null; productId: string | null } | null
+    return raw ?? { price: cached.price, productId: null }
+  }
+
+  // Fetch live
   const product = await searchCard(cardName, options.setName)
-  if (!product) return { price: null, productId: null }
+  if (!product) {
+    await setCachedPrice(cardKey, "pricecharting", null, { price: null, productId: null })
+    return { price: null, productId: null }
+  }
 
   const prices = await getProductPrices(product.id)
-  if (!prices) return { price: null, productId: product.id }
+  if (!prices) {
+    await setCachedPrice(cardKey, "pricecharting", null, { price: null, productId: product.id })
+    return { price: null, productId: product.id }
+  }
+
+  let price: number | null = null
 
   if (options.graded) {
     const company = options.gradingCompany?.toUpperCase()
     const grade = options.grade
 
     if (company === "PSA" && grade) {
-      const psaPrice = prices.gradePrices[grade]
-      if (psaPrice != null) return { price: psaPrice, productId: product.id }
+      price = prices.gradePrices[grade] ?? null
     }
-
-    // Fallback to generic graded price for non-PSA or missing grade
-    return { price: prices.gradedPrice, productId: product.id }
+    if (price === null) price = prices.gradedPrice
+  } else {
+    price = prices.loosePrice
   }
 
-  return { price: prices.loosePrice, productId: product.id }
+  const result = { price, productId: product.id }
+  await setCachedPrice(cardKey, "pricecharting", price, result)
+  return result
 }

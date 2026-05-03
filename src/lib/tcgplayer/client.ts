@@ -1,3 +1,5 @@
+import { buildCacheKey, getCachedPrice, setCachedPrice } from "@/lib/sourcing/priceCache"
+
 export class TCGPlayerConfigError extends Error {
   constructor() {
     super("TCGplayer API keys are not configured. See docs/SETUP.md → TCGplayer API.")
@@ -71,8 +73,7 @@ async function getAccessToken(): Promise<string> {
   return cachedToken
 }
 
-// cardName and setName should be normalized via normalizeTitle() before calling this
-export async function getMarketPrice(
+async function fetchMarketPrice(
   cardName: string,
   setName?: string
 ): Promise<TCGPlayerMarketData | null> {
@@ -82,7 +83,6 @@ export async function getMarketPrice(
 
   const token = await getAccessToken()
 
-  // Search for the product
   const searchParams = new URLSearchParams({
     productName: cardName,
     categoryId: "3", // Pokémon category
@@ -106,7 +106,6 @@ export async function getMarketPrice(
 
   const product = products[0]
 
-  // Fetch pricing
   const priceRes = await fetch(
     `https://api.tcgplayer.com/pricing/product/${product.productId}`,
     {
@@ -119,8 +118,6 @@ export async function getMarketPrice(
 
   const priceData = await priceRes.json()
   const prices: TCGPlayerPrice[] = priceData.results ?? []
-
-  // Prefer "Normal" printing price
   const normal = prices.find((p) => p.subTypeName === "Normal") ?? prices[0]
 
   return {
@@ -133,4 +130,18 @@ export async function getMarketPrice(
     midPrice: normal?.midPrice ?? null,
     lowPrice: normal?.lowPrice ?? null,
   }
+}
+
+export async function getMarketPrice(
+  cardName: string,
+  setName?: string
+): Promise<TCGPlayerMarketData | null> {
+  const cardKey = buildCacheKey(cardName, { setName })
+
+  const cached = await getCachedPrice(cardKey, "tcgplayer")
+  if (cached !== null) return cached.rawData as TCGPlayerMarketData
+
+  const result = await fetchMarketPrice(cardName, setName)
+  await setCachedPrice(cardKey, "tcgplayer", result?.marketPrice ?? null, result)
+  return result
 }

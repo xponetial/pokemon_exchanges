@@ -1,8 +1,10 @@
 import { searchEbay, EbayConfigError } from "@/lib/ebay/client"
+import { getSoldCompsPrice } from "@/lib/ebay/soldComps"
 import { getCardPrice, PriceChartingConfigError } from "@/lib/pricecharting/client"
 import { getMarketPrice, TCGPlayerConfigError } from "@/lib/tcgplayer/client"
 import { normalizeTitle } from "@/lib/sourcing/normalization"
 import { aggregatePrices } from "@/lib/sourcing/pricingAggregator"
+import { buildCacheKey, withCache } from "@/lib/sourcing/priceCache"
 import { createAdminClient } from "@/lib/supabase/server"
 import type { ExternalListing } from "@/lib/types/database"
 
@@ -22,7 +24,6 @@ export async function searchAndSave(
   const missingKeys: string[] = []
   let ebayResults: Awaited<ReturnType<typeof searchEbay>> = []
 
-  // eBay search
   try {
     ebayResults = await searchEbay(query, { limit: options.limit ?? 20 })
   } catch (err) {
@@ -33,7 +34,6 @@ export async function searchAndSave(
     }
   }
 
-  // Build insert rows
   const rows = ebayResults.map((item) => ({
     source: "ebay" as const,
     external_id: item.externalId,
@@ -55,7 +55,6 @@ export async function searchAndSave(
     return { saved: [], skipped: 0, errors, missingKeys }
   }
 
-  // Upsert — skip already-seen listings
   const { data: saved, error: upsertError } = await supabase
     .from("external_listings")
     .upsert(rows, { onConflict: "source,external_id", ignoreDuplicates: true })
@@ -95,41 +94,79 @@ export async function searchAndSave(
     }
   }
 
-  // Enrich with pricing data where possible
+  // Enrich each listing with pricing from all sources
   for (const row of savedRows) {
     if (!row.card_name) continue
+
+    const cardCacheKey = buildCacheKey(row.card_name, {
+      setName: row.set_name ?? undefined,
+      graded: Boolean(row.grading_company),
+      gradingCompany: row.grading_company ?? undefined,
+      grade: row.grade ?? undefined,
+    })
+
     let tcgMarketPrice: number | null = null
     let priceChartingPrice: number | null = null
+    let ebayCompsPrice: number | null = null
 
     try {
-      const market = await getMarketPrice(row.card_name, row.set_name ?? undefined)
-      tcgMarketPrice = market?.marketPrice ?? null
+      tcgMarketPrice = await withCache(
+        cardCacheKey,
+        "tcgplayer",
+        () => getMarketPrice(row.card_name!, row.set_name ?? undefined),
+        (result) => result?.marketPrice ?? null
+      )
     } catch (err) {
       if (err instanceof TCGPlayerConfigError) {
         if (!missingKeys.includes("TCGplayer")) missingKeys.push("TCGplayer")
       }
-      // Non-fatal — continue without market price
     }
 
     try {
-      const priceCharting = await getCardPrice(row.card_name, {
-        setName: row.set_name ?? undefined,
-        graded: Boolean(row.grading_company),
-        gradingCompany: row.grading_company ?? undefined,
-        grade: row.grade ?? undefined,
-      })
-      priceChartingPrice = priceCharting.price
+      priceChartingPrice = await withCache(
+        cardCacheKey,
+        "pricecharting",
+        () => getCardPrice(row.card_name!, {
+          setName: row.set_name ?? undefined,
+          graded: Boolean(row.grading_company),
+          gradingCompany: row.grading_company ?? undefined,
+          grade: row.grade ?? undefined,
+        }),
+        (result) => result.price
+      )
     } catch (err) {
       if (err instanceof PriceChartingConfigError) {
         if (!missingKeys.includes("PriceCharting")) missingKeys.push("PriceCharting")
       }
-      // Non-fatal — continue without PriceCharting price
+    }
+
+    try {
+      const compsQuery = [
+        row.card_name,
+        row.set_name,
+        row.grading_company && row.grade
+          ? `${row.grading_company} ${row.grade}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+
+      ebayCompsPrice = await withCache(
+        cardCacheKey,
+        "ebay_comps",
+        () => getSoldCompsPrice(compsQuery),
+        (result) => result.averagePrice
+      )
+    } catch (err) {
+      if (err instanceof EbayConfigError) {
+        if (!missingKeys.includes("eBay")) missingKeys.push("eBay")
+      }
     }
 
     const aggregated = aggregatePrices({
       tcgplayerPrice: tcgMarketPrice,
       pricechartingPrice: priceChartingPrice,
-      ebayCompsPrice: null,
+      ebayCompsPrice,
       isGraded: Boolean(row.grading_company),
     })
 

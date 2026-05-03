@@ -1,4 +1,4 @@
-# Phase 2d — Price Snapshots + Caching
+# Phase 2e — eBay Sold Comps
 
 ## Project Context
 
@@ -12,139 +12,140 @@ The admin (Mitch) searches eBay for undervalued cards, scores them with AI, and 
 
 ## The Problem This Phase Solves
 
-Every time Mitch runs a search, the app hits TCGplayer and PriceCharting for every single listing. This:
-- Slows down search results
-- Risks hitting API rate limits
-- Wastes money on API calls
-- Throws away pricing history (we never know if a card is trending up or down)
+The current eBay client (`src/lib/ebay/client.ts`) searches **active listings** — cards currently for sale. But active listing prices tell you what sellers *want*, not what buyers *actually pay*.
 
-**The fix:** Cache pricing responses in a `price_snapshots` Supabase table. On subsequent lookups, return the cached value if it's still fresh. Over time, this table becomes a price history database.
+**eBay sold comps** = recently completed/sold listings. These are real transaction prices and are the most accurate signal for what a card is worth right now.
+
+This data feeds into the pricing aggregator (Phase 2c) as the `ebayCompsPrice` input.
 
 ---
 
 ## What Already Exists
 
 ### Relevant files to read before starting:
-- `src/lib/tcgplayer/client.ts` — makes uncached API calls, needs cache wrapper
-- `src/lib/pricecharting/client.ts` — makes uncached API calls, needs cache wrapper (Phase 2b)
-- `src/lib/supabase/server.ts` — `createAdminClient()` for DB writes
-- `supabase/migrations/` — follow existing naming convention for new migration file
-- `src/lib/types/database.ts` — add new table types here
+- `src/lib/ebay/client.ts` — existing eBay Browse API client. Has OAuth token logic. **Read this first** — sold comps uses the same auth pattern.
+- `src/lib/sourcing/search.ts` — orchestrates all pricing enrichment, needs sold comps added
+- `src/lib/sourcing/pricingAggregator.ts` — aggregator from Phase 2c, accepts `ebayCompsPrice: number | null`
+- `src/lib/sourcing/priceCache.ts` — cache layer from Phase 2d, use it here with TTL of 15 minutes
+- `src/lib/types/database.ts` — `ExternalListing` type
+
+### Environment variables (already in `.env.local`):
+- `EBAY_APP_ID` — same App ID used for active listings
+- `EBAY_CLIENT_SECRET` — same secret
 
 ---
 
 ## What To Build
 
-### 1. Database migration
+### 1. `src/lib/ebay/soldComps.ts` (new file)
 
-Name it: `20260502000004_price_snapshots.sql`
-
-```sql
-CREATE TABLE price_snapshots (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  card_key    text NOT NULL,         -- normalized lookup key e.g. "charizard|base-set|psa|10"
-  source      text NOT NULL CHECK (source IN ('tcgplayer', 'pricecharting', 'ebay_comps')),
-  price       numeric(10,2),
-  raw_data    jsonb,
-  expires_at  timestamptz NOT NULL,
-  created_at  timestamptz DEFAULT now(),
-  UNIQUE (card_key, source)
-);
-
-CREATE INDEX idx_price_snapshots_key    ON price_snapshots(card_key, source);
-CREATE INDEX idx_price_snapshots_expiry ON price_snapshots(expires_at);
-
-ALTER TABLE price_snapshots ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "admins_all_price_snapshots" ON price_snapshots FOR ALL USING (
-  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
-);
+**eBay Browse API endpoint for completed items:**
+```
+GET https://api.ebay.com/buy/browse/v1/item_summary/search
+  ?q={query}
+  &filter=buyingOptions:{FIXED_PRICE|AUCTION},itemLocationCountry:US
+  &sort=endDateRecent
+  &fieldgroups=EXTENDED
 ```
 
-After writing this file run: `npx supabase db push --include-all`
+To get **sold** items specifically, use the eBay `buyingOptions` filter or the `completedItems` search endpoint.
 
-### 2. `src/lib/sourcing/priceCache.ts` (new file)
+Note: The eBay Browse API v1 doesn't directly expose sold/completed items — that's in the Finding API (`findCompletedItems`). Use the Finding API:
 
-A generic cache layer that wraps any pricing API call.
+**Finding API endpoint:**
+```
+https://svcs.ebay.com/services/search/FindingService/v1
+  ?OPERATION-NAME=findCompletedItems
+  &SERVICE-VERSION=1.0.0
+  &SECURITY-APPNAME={EBAY_APP_ID}
+  &RESPONSE-DATA-FORMAT=JSON
+  &keywords={query}
+  &itemFilter(0).name=SoldItemsOnly
+  &itemFilter(1).name=Condition
+  &itemFilter(1).value=3000
+  &sortOrder=EndTimeSoonest
+  &paginationInput.entriesPerPage=10
+```
 
-**TTLs (per PRD):**
-- `pricecharting`: 12 hours
-- `tcgplayer`: 6 hours
-- `ebay_comps`: 15 minutes
+Note: Finding API uses `EBAY_APP_ID` directly (no OAuth needed).
 
-**Exports:**
+**Export:**
 ```ts
-// Build a consistent cache key from card attributes
-buildCacheKey(cardName: string, options?: {
-  setName?: string
-  graded?: boolean
-  gradingCompany?: string
-  grade?: string
-}): string
+interface EbaySoldComp {
+  title: string
+  soldPrice: number
+  soldAt: string       // ISO date string
+  condition: string | null
+  url: string
+}
 
-// Get cached price if not expired
-getCachedPrice(cardKey: string, source: PriceSource): Promise<CachedPrice | null>
-
-// Save a price to the cache
-setCachedPrice(cardKey: string, source: PriceSource, price: number, rawData: unknown): Promise<void>
-
-// Wrap any pricing function with cache-aside logic
-withCache<T>(
-  cardKey: string,
-  source: PriceSource,
-  fetcher: () => Promise<T | null>,
-  transform: (result: T) => number | null
-): Promise<number | null>
+// Returns average sold price from recent comps, or null if not enough data
+getSoldCompsPrice(
+  query: string,        // normalized card name + grade e.g. "Charizard Base Set PSA 10"
+  options?: { limit?: number }
+): Promise<{ averagePrice: number | null; comps: EbaySoldComp[]; count: number }>
 ```
 
-### 3. Update `src/lib/tcgplayer/client.ts`
+**Averaging logic:**
+- Fetch last 10 sold listings
+- Remove outliers (prices more than 2 standard deviations from mean)
+- Return average of remaining prices
+- If fewer than 3 comps found, return `averagePrice: null` (not enough data)
 
-Wrap `getMarketPrice()` with `withCache()` from `priceCache.ts`. The function signature stays the same — caching is transparent to callers.
+**Handle missing `EBAY_APP_ID` gracefully** — import and throw `EbayConfigError` from `src/lib/ebay/client.ts`.
 
-### 4. Update `src/lib/pricecharting/client.ts` (Phase 2b file)
+### 2. Update `src/lib/sourcing/search.ts`
 
-Same — wrap `getCardPrice()` with `withCache()`.
+After normalization and TCGplayer/PriceCharting enrichment, call `getSoldCompsPrice()` using the normalized card name + grade as the query. Pass the result into `aggregatePrices()` as `ebayCompsPrice`.
 
-### 5. Update `src/lib/types/database.ts`
+Use the cache from Phase 2d (`withCache`) with a 15-minute TTL for sold comps (prices change faster than catalog data).
 
-Add the `price_snapshots` table type.
+### 3. `src/app/api/sourcing/comps/route.ts` (new file)
 
-### 6. Add a cache stats display to `/admin` dashboard
+A test/lookup endpoint:
+```
+GET /api/sourcing/comps?query=Charizard+Base+Set+PSA+10
+Response: { averagePrice, comps[], count }
+```
 
-On the admin dashboard page (`src/app/(admin)/admin/page.tsx`), add a small stat showing:
-- Total cached prices
-- Cache hit rate (approximate: snapshots not expired / total snapshots)
+Admin-only.
 
-This gives Mitch visibility into whether the cache is working.
+### 4. Update deal detail page `src/app/(admin)/admin/sourcing/[id]/page.tsx`
+
+In the Pricing section, add a "Recent eBay Sales" subsection showing the last 3–5 sold comps with price and date. This gives Mitch direct evidence for the fair value.
 
 ---
 
-## Cache-Aside Pattern
+## Auth Pattern (copy from existing routes)
 
-```
-Request price for "Charizard PSA 10"
-  → Build cache key: "charizard|base-set|psa|10"
-  → Check price_snapshots WHERE card_key = key AND source = 'tcgplayer' AND expires_at > now()
-  → If found: return cached price
-  → If not found: call TCGplayer API → save to price_snapshots with expiry → return price
+```ts
+const supabase = await createClient()
+const { data: { user } } = await supabase.auth.getUser()
+if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single()
+if (profile?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 ```
 
 ---
 
 ## Definition of Done
 
-- [ ] `price_snapshots` table exists in Supabase (migration applied)
-- [ ] `src/lib/sourcing/priceCache.ts` exists with `withCache`, `getCachedPrice`, `setCachedPrice`, `buildCacheKey`
-- [ ] TCGplayer and PriceCharting clients use cache — second search for same card skips API call
-- [ ] `src/lib/types/database.ts` includes `price_snapshots` type
-- [ ] Admin dashboard shows cache stats
+- [ ] `src/lib/ebay/soldComps.ts` exists with `getSoldCompsPrice()`
+- [ ] Sold comps average price feeds into the pricing aggregator as `ebayCompsPrice`
+- [ ] Result is cached with 15-minute TTL via Phase 2d cache
+- [ ] `GET /api/sourcing/comps?query=...` returns comp data
+- [ ] Deal detail page shows recent eBay sold prices
+- [ ] Handles fewer than 3 comps gracefully (returns null, doesn't break scoring)
+- [ ] Missing `EBAY_APP_ID` shows warning, doesn't crash
 - [ ] `npm run build` passes with no type errors
 
 ---
 
 ## Testing
 
-1. `npm install` then `npm run dev -- -p 3004`
-2. Go to `/admin/sourcing`, search for `"Charizard Base Set"` — note response time
-3. Search again for the same term — should be faster (TCGplayer/PriceCharting calls skipped)
-4. Check `price_snapshots` table in Supabase — should have rows with `expires_at` in the future
-5. Manually set an `expires_at` in the past on a row — next search should refresh it
+1. `npm install` then `npm run dev -- -p 3005`
+2. Call `GET /api/sourcing/comps?query=Charizard+Base+Set+PSA+10`
+3. Should return a list of recent sold prices + an average
+4. Go to `/admin/sourcing`, search for a card, score it
+5. Deal detail page should show "Recent eBay Sales" with real comp prices
+6. Check that `aggregated_prices` table now has `ebay_comps_price` populated

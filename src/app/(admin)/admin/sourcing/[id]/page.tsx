@@ -5,6 +5,9 @@ import Link from "next/link"
 import { ExternalLink, ArrowLeft } from "lucide-react"
 import { ScoreBadge, RecommendationBadge } from "@/components/admin/ScoreBadge"
 import { formatPriceDollars } from "@/lib/utils"
+import { getSoldCompsPrice } from "@/lib/ebay/soldComps"
+import { EbayConfigError } from "@/lib/ebay/client"
+import type { EbaySoldComp } from "@/lib/ebay/soldComps"
 import type { Metadata } from "next"
 
 export const metadata: Metadata = { title: "Deal Detail — Admin" }
@@ -37,6 +40,32 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
   const score = listing.deal_scores?.[0] ?? null
   const savings = listing.market_price ? listing.market_price - listing.price : null
+
+  // Fetch sold comps for this card (best-effort, non-blocking)
+  let soldComps: EbaySoldComp[] = []
+  let compsAvgPrice: number | null = null
+  if (listing.card_name) {
+    try {
+      const compsQuery = [
+        listing.card_name,
+        listing.set_name,
+        listing.grading_company && listing.grade
+          ? `${listing.grading_company} ${listing.grade}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+
+      const result = await getSoldCompsPrice(compsQuery, { limit: 5 })
+      soldComps = result.comps.slice(0, 5)
+      compsAvgPrice = result.averagePrice
+    } catch (err) {
+      if (!(err instanceof EbayConfigError)) {
+        // EbayConfigError is silently swallowed — just means no eBay keys
+        console.error("soldComps fetch error:", err)
+      }
+    }
+  }
 
   return (
     <div>
@@ -158,6 +187,49 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                   </div>
                 </div>
               </div>
+            )}
+          </div>
+
+          {/* Recent eBay Sales */}
+          <div className="bg-surface rounded border border-border p-4">
+            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-widest mb-3">Recent eBay Sales</h2>
+            {soldComps.length === 0 ? (
+              <p className="text-sm text-text-muted">
+                {listing.card_name ? "No recent sold comps found." : "Score this listing to enable comp lookup."}
+              </p>
+            ) : (
+              <>
+                {compsAvgPrice != null && (
+                  <p className="text-sm font-semibold text-text mb-3">
+                    Avg sold price: <span className="text-primary">{formatPriceDollars(compsAvgPrice)}</span>
+                    <span className="text-xs font-normal text-text-muted ml-1">(last {soldComps.length} sales)</span>
+                  </p>
+                )}
+                <div className="space-y-2">
+                  {soldComps.map((comp, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm gap-2">
+                      <div className="min-w-0">
+                        <a
+                          href={comp.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-text hover:text-primary truncate block"
+                          title={comp.title}
+                        >
+                          {comp.title.length > 60 ? `${comp.title.slice(0, 60)}…` : comp.title}
+                        </a>
+                        <span className="text-xs text-text-muted">
+                          {new Date(comp.soldAt).toLocaleDateString()}
+                          {comp.condition ? ` · ${comp.condition}` : ""}
+                        </span>
+                      </div>
+                      <span className="font-semibold text-text whitespace-nowrap">
+                        {formatPriceDollars(comp.soldPrice)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
 

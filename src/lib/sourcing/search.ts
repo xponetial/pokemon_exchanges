@@ -1,5 +1,10 @@
 import { searchEbay, EbayConfigError } from "@/lib/ebay/client"
+import { getSoldCompsPrice, EbaySoldComp } from "@/lib/ebay/soldComps"
+import { getCardPrice, PriceChartingConfigError } from "@/lib/pricecharting/client"
 import { getMarketPrice, TCGPlayerConfigError } from "@/lib/tcgplayer/client"
+import { normalizeTitle } from "@/lib/sourcing/normalization"
+import { aggregatePrices } from "@/lib/sourcing/pricingAggregator"
+import { withCache, TTL } from "@/lib/sourcing/priceCache"
 import { createAdminClient } from "@/lib/supabase/server"
 import type { ExternalListing } from "@/lib/types/database"
 
@@ -19,7 +24,6 @@ export async function searchAndSave(
   const missingKeys: string[] = []
   let ebayResults: Awaited<ReturnType<typeof searchEbay>> = []
 
-  // eBay search
   try {
     ebayResults = await searchEbay(query, { limit: options.limit ?? 20 })
   } catch (err) {
@@ -30,7 +34,6 @@ export async function searchAndSave(
     }
   }
 
-  // Build insert rows
   const rows = ebayResults.map((item) => ({
     source: "ebay" as const,
     external_id: item.externalId,
@@ -52,7 +55,6 @@ export async function searchAndSave(
     return { saved: [], skipped: 0, errors, missingKeys }
   }
 
-  // Upsert — skip already-seen listings
   const { data: saved, error: upsertError } = await supabase
     .from("external_listings")
     .upsert(rows, { onConflict: "source,external_id", ignoreDuplicates: true })
@@ -63,30 +65,126 @@ export async function searchAndSave(
   const savedRows = (saved ?? []) as ExternalListing[]
   const skipped = rows.length - savedRows.length
 
-  // Enrich with TCGplayer market prices where possible
+  // Normalize titles for listings that have no card_name yet
   for (const row of savedRows) {
-    if (!row.card_name) continue
+    if (row.card_name) continue
     try {
-      const market = await getMarketPrice(row.card_name, row.set_name ?? undefined)
-      if (market?.marketPrice) {
-        const diff = ((market.marketPrice - row.price) / market.marketPrice) * 100
+      const normalized = await normalizeTitle(row.title)
+      if (normalized.card_name) {
         await supabase
           .from("external_listings")
           .update({
-            market_price: market.marketPrice,
-            price_diff_percent: Math.round(diff * 100) / 100,
+            card_name: normalized.card_name,
+            set_name: normalized.set_name,
+            card_number: normalized.card_number,
+            condition: normalized.condition,
+            grading_company: normalized.grading_company,
+            grade: normalized.grade,
           })
           .eq("id", row.id)
-        row.market_price = market.marketPrice
-        row.price_diff_percent = Math.round(diff * 100) / 100
+        row.card_name = normalized.card_name
+        row.set_name = normalized.set_name
+        row.card_number = normalized.card_number
+        row.condition = normalized.condition
+        row.grading_company = normalized.grading_company
+        row.grade = normalized.grade
       }
+    } catch {
+      // Non-fatal — continue without normalization
+    }
+  }
+
+  // Enrich each listing with pricing from all sources
+  for (const row of savedRows) {
+    if (!row.card_name) continue
+
+    let tcgMarketPrice: number | null = null
+    let priceChartingPrice: number | null = null
+    let ebayCompsPrice: number | null = null
+
+    try {
+      const market = await getMarketPrice(row.card_name, row.set_name ?? undefined)
+      tcgMarketPrice = market?.marketPrice ?? null
     } catch (err) {
       if (err instanceof TCGPlayerConfigError) {
         if (!missingKeys.includes("TCGplayer")) missingKeys.push("TCGplayer")
       }
-      // Non-fatal — continue without market price
+    }
+
+    try {
+      const priceCharting = await getCardPrice(row.card_name, {
+        setName: row.set_name ?? undefined,
+        graded: Boolean(row.grading_company),
+        gradingCompany: row.grading_company ?? undefined,
+        grade: row.grade ?? undefined,
+      })
+      priceChartingPrice = priceCharting.price
+    } catch (err) {
+      if (err instanceof PriceChartingConfigError) {
+        if (!missingKeys.includes("PriceCharting")) missingKeys.push("PriceCharting")
+      }
+    }
+
+    try {
+      const compsQuery = [
+        row.card_name,
+        row.set_name,
+        row.grading_company && row.grade
+          ? `${row.grading_company} ${row.grade}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+
+      const compsResult = await withCache(
+        `ebay-comps:${compsQuery.toLowerCase()}`,
+        TTL.EBAY_COMPS,
+        () => getSoldCompsPrice(compsQuery)
+      )
+      ebayCompsPrice = compsResult.averagePrice
+    } catch (err) {
+      if (err instanceof EbayConfigError) {
+        if (!missingKeys.includes("eBay")) missingKeys.push("eBay")
+      }
+    }
+
+    const aggregated = aggregatePrices({
+      tcgplayerPrice: tcgMarketPrice,
+      pricechartingPrice: priceChartingPrice,
+      ebayCompsPrice,
+      isGraded: Boolean(row.grading_company),
+    })
+
+    if (aggregated.fairValue > 0) {
+      const diff = ((aggregated.fairValue - row.price) / aggregated.fairValue) * 100
+      await supabase
+        .from("external_listings")
+        .update({
+          market_price: aggregated.fairValue,
+          price_diff_percent: Math.round(diff * 100) / 100,
+        })
+        .eq("id", row.id)
+      row.market_price = aggregated.fairValue
+      row.price_diff_percent = Math.round(diff * 100) / 100
+
+      await supabase.from("aggregated_prices").upsert(
+        {
+          external_listing_id: row.id,
+          fair_value: aggregated.fairValue,
+          confidence_score: aggregated.confidenceScore,
+          tcgplayer_price: aggregated.sources.tcgplayer,
+          pricecharting_price: aggregated.sources.pricecharting,
+          ebay_comps_price: aggregated.sources.ebayComps,
+          is_graded: aggregated.isGraded,
+          weights: aggregated.weights,
+        },
+        { onConflict: "external_listing_id" }
+      )
     }
   }
 
   return { saved: savedRows, skipped, errors, missingKeys }
 }
+
+// Re-export so callers can reference the type without importing soldComps directly
+export type { EbaySoldComp }

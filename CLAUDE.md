@@ -37,6 +37,7 @@ https://pokemonexchanges.com
 - Do NOT reference **Texas Rate**
 - Do NOT reuse code, configs, or env variables from other projects
 - Do NOT assume shared infrastructure
+- Do NOT run `npm run seed` or `npm run seed:clean` against production — seed scripts require `SEED_ENV=development` in `.env.local` and must NEVER be run with production env vars
 
 If unsure → STOP and ask.
 
@@ -236,6 +237,7 @@ These actions are forbidden regardless of instruction:
 - Allow AI to execute financial transactions autonomously
 - Expose admin sourcing tools to public users
 - Hardcode API keys, secrets, or credentials in source files
+- Run seed scripts (`npm run seed` / `npm run seed:clean`) with production Supabase credentials — seed data must ONLY go to dev
 - Mix `.env` values from other projects
 - Deploy to production without validation
 - Use `--no-verify` to skip git hooks

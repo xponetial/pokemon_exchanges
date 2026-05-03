@@ -1,4 +1,5 @@
 import { searchEbay, EbayConfigError } from "@/lib/ebay/client"
+import { getCardPrice, PriceChartingConfigError } from "@/lib/pricecharting/client"
 import { getMarketPrice, TCGPlayerConfigError } from "@/lib/tcgplayer/client"
 import { createAdminClient } from "@/lib/supabase/server"
 import type { ExternalListing } from "@/lib/types/database"
@@ -63,28 +64,52 @@ export async function searchAndSave(
   const savedRows = (saved ?? []) as ExternalListing[]
   const skipped = rows.length - savedRows.length
 
-  // Enrich with TCGplayer market prices where possible
+  // Enrich with pricing data where possible
   for (const row of savedRows) {
     if (!row.card_name) continue
+    let tcgMarketPrice: number | null = null
+    let priceChartingPrice: number | null = null
+
     try {
       const market = await getMarketPrice(row.card_name, row.set_name ?? undefined)
-      if (market?.marketPrice) {
-        const diff = ((market.marketPrice - row.price) / market.marketPrice) * 100
-        await supabase
-          .from("external_listings")
-          .update({
-            market_price: market.marketPrice,
-            price_diff_percent: Math.round(diff * 100) / 100,
-          })
-          .eq("id", row.id)
-        row.market_price = market.marketPrice
-        row.price_diff_percent = Math.round(diff * 100) / 100
-      }
+      tcgMarketPrice = market?.marketPrice ?? null
     } catch (err) {
       if (err instanceof TCGPlayerConfigError) {
         if (!missingKeys.includes("TCGplayer")) missingKeys.push("TCGplayer")
       }
       // Non-fatal — continue without market price
+    }
+
+    try {
+      const priceCharting = await getCardPrice(row.card_name, {
+        setName: row.set_name ?? undefined,
+        graded: Boolean(row.grading_company),
+        gradingCompany: row.grading_company ?? undefined,
+        grade: row.grade ?? undefined,
+      })
+      priceChartingPrice = priceCharting.price
+    } catch (err) {
+      if (err instanceof PriceChartingConfigError) {
+        if (!missingKeys.includes("PriceCharting")) missingKeys.push("PriceCharting")
+      }
+      // Non-fatal — continue without PriceCharting price
+    }
+
+    const marketPrice = row.grading_company
+      ? (priceChartingPrice ?? tcgMarketPrice)
+      : (tcgMarketPrice ?? priceChartingPrice)
+
+    if (marketPrice !== null && marketPrice > 0) {
+      const diff = ((marketPrice - row.price) / marketPrice) * 100
+      await supabase
+        .from("external_listings")
+        .update({
+          market_price: marketPrice,
+          price_diff_percent: Math.round(diff * 100) / 100,
+        })
+        .eq("id", row.id)
+      row.market_price = marketPrice
+      row.price_diff_percent = Math.round(diff * 100) / 100
     }
   }
 

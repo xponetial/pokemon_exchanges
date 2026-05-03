@@ -2,6 +2,7 @@ import { searchEbay, EbayConfigError } from "@/lib/ebay/client"
 import { getCardPrice, PriceChartingConfigError } from "@/lib/pricecharting/client"
 import { getMarketPrice, TCGPlayerConfigError } from "@/lib/tcgplayer/client"
 import { normalizeTitle } from "@/lib/sourcing/normalization"
+import { aggregatePrices } from "@/lib/sourcing/pricingAggregator"
 import { createAdminClient } from "@/lib/supabase/server"
 import type { ExternalListing } from "@/lib/types/database"
 
@@ -125,21 +126,38 @@ export async function searchAndSave(
       // Non-fatal — continue without PriceCharting price
     }
 
-    const marketPrice = row.grading_company
-      ? (priceChartingPrice ?? tcgMarketPrice)
-      : (tcgMarketPrice ?? priceChartingPrice)
+    const aggregated = aggregatePrices({
+      tcgplayerPrice: tcgMarketPrice,
+      pricechartingPrice: priceChartingPrice,
+      ebayCompsPrice: null,
+      isGraded: Boolean(row.grading_company),
+    })
 
-    if (marketPrice !== null && marketPrice > 0) {
-      const diff = ((marketPrice - row.price) / marketPrice) * 100
+    if (aggregated.fairValue > 0) {
+      const diff = ((aggregated.fairValue - row.price) / aggregated.fairValue) * 100
       await supabase
         .from("external_listings")
         .update({
-          market_price: marketPrice,
+          market_price: aggregated.fairValue,
           price_diff_percent: Math.round(diff * 100) / 100,
         })
         .eq("id", row.id)
-      row.market_price = marketPrice
+      row.market_price = aggregated.fairValue
       row.price_diff_percent = Math.round(diff * 100) / 100
+
+      await supabase.from("aggregated_prices").upsert(
+        {
+          external_listing_id: row.id,
+          fair_value: aggregated.fairValue,
+          confidence_score: aggregated.confidenceScore,
+          tcgplayer_price: aggregated.sources.tcgplayer,
+          pricecharting_price: aggregated.sources.pricecharting,
+          ebay_comps_price: aggregated.sources.ebayComps,
+          is_graded: aggregated.isGraded,
+          weights: aggregated.weights,
+        },
+        { onConflict: "external_listing_id" }
+      )
     }
   }
 

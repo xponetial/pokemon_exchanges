@@ -352,6 +352,41 @@ export interface Database {
           priority?: "low" | "normal" | "high"
         }
       }
+      aggregated_prices: {
+        Row: {
+          id: string
+          external_listing_id: string | null
+          fair_value: number
+          confidence_score: number
+          tcgplayer_price: number | null
+          pricecharting_price: number | null
+          ebay_comps_price: number | null
+          is_graded: boolean
+          weights: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          external_listing_id?: string | null
+          fair_value: number
+          confidence_score: number
+          tcgplayer_price?: number | null
+          pricecharting_price?: number | null
+          ebay_comps_price?: number | null
+          is_graded?: boolean
+          weights?: Json | null
+          created_at?: string
+        }
+        Update: {
+          fair_value?: number
+          confidence_score?: number
+          tcgplayer_price?: number | null
+          pricecharting_price?: number | null
+          ebay_comps_price?: number | null
+          is_graded?: boolean
+          weights?: Json | null
+        }
+      }
       sourced_inventory: {
         Row: {
           id: string
@@ -432,6 +467,8 @@ export type ExternalListing = Database["public"]["Tables"]["external_listings"][
 export type DealScore = Database["public"]["Tables"]["deal_scores"]["Row"]
 export type WatchlistItem = Database["public"]["Tables"]["watchlist"]["Row"]
 export type SourcedInventory = Database["public"]["Tables"]["sourced_inventory"]["Row"]
+
+export type AggregatedPriceRow = Database["public"]["Tables"]["aggregated_prices"]["Row"]
 
 export type ListingWithSeller = Listing & { sellers: Pick<Seller, "display_name" | "rating"> }
 export type ExternalListingWithScore = ExternalListing & { deal_scores: DealScore[] }

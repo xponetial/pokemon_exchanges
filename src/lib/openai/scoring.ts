@@ -1,8 +1,8 @@
-import type { ExternalListing } from "@/lib/types/database"
+﻿import type { ExternalListing } from "@/lib/types/database"
 
 export class OpenAIConfigError extends Error {
   constructor() {
-    super("OpenAI API key is not configured. See docs/SETUP.md → OpenAI.")
+    super("OpenAI API key is not configured. See docs/SETUP.md â†’ OpenAI.")
     this.name = "OpenAIConfigError"
   }
 }
@@ -22,7 +22,8 @@ export interface DealScoreResult {
 
 export async function scoreDeal(
   listing: ExternalListing,
-  marketPrice: number | null
+  marketPrice: number | null,
+  confidenceScore?: number | null
 ): Promise<DealScoreResult> {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) throw new OpenAIConfigError()
@@ -31,13 +32,13 @@ export async function scoreDeal(
     ? Math.round(((marketPrice - listing.price) / marketPrice) * 100)
     : null
 
-  const prompt = `You are an expert Pokémon card trader evaluating a potential arbitrage deal.
+  const prompt = `You are an expert PokÃ©mon card trader evaluating a potential arbitrage deal.
 
 LISTING DATA:
 - Title: ${listing.title}
 - Source: ${listing.source}
 - Price: $${listing.price}${listing.shipping_cost ? ` + $${listing.shipping_cost} shipping` : " (free shipping)"}
-- Market Price (TCGplayer): ${marketPrice ? `$${marketPrice}` : "unknown"}
+- Market Price (Fair Value): ${marketPrice ? `$${marketPrice}${confidenceScore != null ? ` (confidence: ${confidenceScore}/100)` : ""}` : "unknown"}
 - Price below market: ${priceDiff !== null ? `${priceDiff}%` : "unknown"}
 - Seller: ${listing.seller_name ?? "unknown"} (feedback: ${listing.seller_feedback_percent ?? "?"}% positive, ${listing.seller_feedback_score ?? "?"} reviews)
 - Condition noted: ${listing.condition ?? "not specified"}

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "seed": "npx tsx scripts/seed-listings.ts",
-    "seed:clean": "npx tsx scripts/seed-listings.ts --clean"
+    "seed:clean": "npx tsx scripts/seed-listings.ts --clean",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -35,6 +37,8 @@
     "eslint-config-next": "16.2.4",
     "supabase": "^2.98.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.5"
   }
 }

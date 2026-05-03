@@ -71,6 +71,7 @@ async function getAccessToken(): Promise<string> {
   return cachedToken
 }
 
+// cardName and setName should be normalized via normalizeTitle() before calling this
 export async function getMarketPrice(
   cardName: string,
   setName?: string

@@ -1,6 +1,7 @@
 import { searchEbay, EbayConfigError } from "@/lib/ebay/client"
 import { getCardPrice, PriceChartingConfigError } from "@/lib/pricecharting/client"
 import { getMarketPrice, TCGPlayerConfigError } from "@/lib/tcgplayer/client"
+import { normalizeTitle } from "@/lib/sourcing/normalization"
 import { createAdminClient } from "@/lib/supabase/server"
 import type { ExternalListing } from "@/lib/types/database"
 
@@ -63,6 +64,35 @@ export async function searchAndSave(
 
   const savedRows = (saved ?? []) as ExternalListing[]
   const skipped = rows.length - savedRows.length
+
+  // Normalize titles for listings that have no card_name yet
+  for (const row of savedRows) {
+    if (row.card_name) continue
+    try {
+      const normalized = await normalizeTitle(row.title)
+      if (normalized.card_name) {
+        await supabase
+          .from("external_listings")
+          .update({
+            card_name: normalized.card_name,
+            set_name: normalized.set_name,
+            card_number: normalized.card_number,
+            condition: normalized.condition,
+            grading_company: normalized.grading_company,
+            grade: normalized.grade,
+          })
+          .eq("id", row.id)
+        row.card_name = normalized.card_name
+        row.set_name = normalized.set_name
+        row.card_number = normalized.card_number
+        row.condition = normalized.condition
+        row.grading_company = normalized.grading_company
+        row.grade = normalized.grade
+      }
+    } catch {
+      // Non-fatal — continue without normalization
+    }
+  }
 
   // Enrich with pricing data where possible
   for (const row of savedRows) {

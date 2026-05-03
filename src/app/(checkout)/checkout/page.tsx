@@ -82,7 +82,7 @@ export default function CheckoutPage() {
 
         if (orderError || !order) throw new Error(orderError?.message ?? "Order creation failed")
 
-        // Create order items
+        // Create order items — DB trigger auto-marks each listing as sold
         await sb.from("order_items").insert(
           sellerItems.map((i: typeof sellerItems[0]) => ({
             order_id: order.id,
@@ -91,12 +91,6 @@ export default function CheckoutPage() {
             quantity: i.quantity,
           }))
         )
-
-        // Mark listings as sold
-        await sb
-          .from("listings")
-          .update({ status: "sold" })
-          .in("id", sellerItems.map((i: typeof sellerItems[0]) => i.listing.id))
       }
 
       clearCart()

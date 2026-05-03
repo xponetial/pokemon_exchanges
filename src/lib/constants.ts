@@ -147,12 +147,12 @@ export const POKEMON_SETS = [
 ] as const
 
 export const CATEGORY_LINKS = [
-  { label: "All Cards", href: "/" },
-  { label: "Base Set", href: "/?set=Base+Set" },
-  { label: "PSA Graded", href: "/?condition=Graded&grader=PSA" },
-  { label: "BGS Graded", href: "/?condition=Graded&grader=BGS" },
-  { label: "Vintage", href: "/?era=vintage" },
-  { label: "Modern", href: "/?era=modern" },
-  { label: "Deals", href: "/?sort=price_asc" },
-  { label: "Recently Listed", href: "/?sort=newest" },
+  { label: "All Cards", href: "/browse" },
+  { label: "Base Set", href: "/browse?set=Base+Set" },
+  { label: "PSA Graded", href: "/browse?condition=Graded&grader=PSA" },
+  { label: "BGS Graded", href: "/browse?condition=Graded&grader=BGS" },
+  { label: "Vintage", href: "/browse?era=vintage" },
+  { label: "Modern", href: "/browse?era=modern" },
+  { label: "Deals", href: "/browse?sort=price_asc" },
+  { label: "Recently Listed", href: "/browse?sort=newest" },
 ] as const

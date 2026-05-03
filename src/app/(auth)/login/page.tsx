@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { GoogleButton } from "@/components/auth/GoogleButton"
 
 function LoginForm() {
   const router = useRouter()
@@ -36,6 +37,14 @@ function LoginForm() {
           </div>
           <h1 className="text-xl font-bold text-text">Sign in to Pokemon Exchanges</h1>
           <p className="text-text-secondary text-sm mt-1">Buy, sell, and track Pokémon cards</p>
+        </div>
+
+        <GoogleButton redirectTo={redirect} />
+
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs text-text-secondary">or continue with email</span>
+          <div className="flex-1 h-px bg-border" />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

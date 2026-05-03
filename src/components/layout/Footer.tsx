@@ -8,9 +8,9 @@ export function Footer() {
           <div>
             <p className="font-semibold text-text mb-2">Marketplace</p>
             <ul className="space-y-1 text-text-secondary">
-              <li><Link href="/" className="hover:text-primary">Browse Cards</Link></li>
-              <li><Link href="/?sort=newest" className="hover:text-primary">New Listings</Link></li>
-              <li><Link href="/?sort=price_asc" className="hover:text-primary">Deals</Link></li>
+              <li><Link href="/browse" className="hover:text-primary">Browse Cards</Link></li>
+              <li><Link href="/browse?sort=newest" className="hover:text-primary">New Listings</Link></li>
+              <li><Link href="/browse?sort=price_asc" className="hover:text-primary">Deals</Link></li>
             </ul>
           </div>
           <div>

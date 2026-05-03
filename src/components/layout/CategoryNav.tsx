@@ -8,7 +8,7 @@ export function CategoryNav() {
   const params = useSearchParams()
 
   function isActive(href: string): boolean {
-    if (href === "/") return !params.toString()
+    if (href === "/browse") return !params.toString()
     const url = new URL(href, "http://x")
     return [...url.searchParams.entries()].every(
       ([k, v]) => params.get(k) === v

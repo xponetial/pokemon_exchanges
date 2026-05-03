@@ -14,3 +14,29 @@ See [docs/PRD.md](docs/PRD.md) for the full product requirements document.
 
 ## Tech Stack
 Next.js + Tailwind · Supabase (Postgres + Auth) · Stripe Connect · OpenAI · Vercel
+
+## Dev Seed Data
+
+Populate the dev database with 20 fake Pokemon card listings (real card images from the Pokemon TCG API):
+
+```bash
+npm run seed
+```
+
+Then start the dev server and browse the marketplace:
+
+```bash
+npm run dev
+# visit /browse or the home page to see listings
+```
+
+To wipe seed data and start fresh:
+
+```bash
+npm run seed:clean
+npm run seed
+```
+
+**Requirements:** `SEED_ENV=development` must be in `.env.local` (already set). The seed script hard-blocks against any environment that doesn't have this — seed data will never reach production.
+
+Seed sellers are identified by their `@pokeseed.dev` email domain. `seed:clean` only removes those accounts and their listings — real user data is never touched.

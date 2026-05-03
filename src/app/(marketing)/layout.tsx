@@ -1,16 +1,11 @@
 import { Header } from "@/components/layout/Header"
-import { CategoryNav } from "@/components/layout/CategoryNav"
 import { Footer } from "@/components/layout/Footer"
-import { Suspense } from "react"
 
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <Header />
-      <Suspense>
-        <CategoryNav />
-      </Suspense>
-      <main className="flex-1 max-w-screen-xl mx-auto w-full px-4 py-6">
+      <main className="flex-1">
         {children}
       </main>
       <Footer />

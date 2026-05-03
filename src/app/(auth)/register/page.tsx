@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { GoogleButton } from "@/components/auth/GoogleButton"
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -53,6 +54,14 @@ export default function RegisterPage() {
             <span className="text-white font-bold">PE</span>
           </div>
           <h1 className="text-xl font-bold text-text">Create your account</h1>
+        </div>
+
+        <GoogleButton />
+
+        <div className="flex items-center gap-3 my-5">
+          <div className="flex-1 h-px bg-border" />
+          <span className="text-xs text-text-secondary">or sign up with email</span>
+          <div className="flex-1 h-px bg-border" />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

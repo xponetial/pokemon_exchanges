@@ -156,6 +156,46 @@ npm install -D playwright
 
 ---
 
+# 🗄️ Database Schema Rules (MANDATORY)
+
+Every database schema create or modification **must** be committed to GitHub. No exceptions.
+
+## Required Workflow
+
+1. Create or modify schema (migration file, SQL script, or Supabase migration)
+2. Stage the file immediately
+3. Commit with a clear message describing the change
+4. Push to the current phase branch
+
+## This Applies To
+
+- Supabase migration files (`supabase/migrations/*.sql`)
+- Any hand-written SQL scripts
+- Schema type changes (`supabase gen types typescript` output)
+- RLS policy changes
+- Index additions or removals
+- Seed data scripts
+
+## Commit Message Format for Schema Changes
+
+```
+db: <short description>
+
+Examples:
+db: add listings table with RLS policies
+db: add deal_scores table and indexes
+db: update orders table — add escrow_status column
+db: add RLS policy for seller listings
+```
+
+## ❌ NEVER
+
+- Apply a schema change locally without committing it
+- Run `supabase db push` without first committing the migration file
+- Leave generated types (`database.types.ts`) uncommitted after a schema change
+
+---
+
 # ⚠️ ASK BEFORE DOING
 
 The following require explicit confirmation before proceeding:
@@ -238,6 +278,7 @@ EBAY_APP_ID=
 | Normal dev work (files, code, tests) | Proceed automatically |
 | Running approved commands | Proceed automatically |
 | Installing pre-approved packages | Proceed automatically |
+| Creating or modifying DB schema | Commit + push immediately, no exceptions |
 | Deploying to production | Ask first |
 | Dropping data / destructive ops | Ask first |
 | Anything touching Party Swami / Texas Rate | STOP immediately |

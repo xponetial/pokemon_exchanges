@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { getSoldCompsPrice } from "@/lib/ebay/soldComps"
 import { EbayConfigError } from "@/lib/ebay/client"
-import { withCache, TTL } from "@/lib/sourcing/priceCache"
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -22,11 +21,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const result = await withCache(
-      `ebay-comps:${query.toLowerCase()}`,
-      TTL.EBAY_COMPS,
-      () => getSoldCompsPrice(query)
-    )
+    const result = await getSoldCompsPrice(query)
     return NextResponse.json(result)
   } catch (err) {
     if (err instanceof EbayConfigError) {

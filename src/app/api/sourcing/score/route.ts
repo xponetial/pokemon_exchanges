@@ -41,7 +41,13 @@ export async function POST(req: Request) {
     .eq("id", listing.id)
 
   try {
-    const scoreResult = await scoreDeal(listing, listing.market_price)
+    const { data: aggRow } = await adminClient
+      .from("aggregated_prices")
+      .select("confidence_score")
+      .eq("external_listing_id", listing.id)
+      .single()
+
+    const scoreResult = await scoreDeal(listing, listing.market_price, aggRow?.confidence_score ?? null)
 
     const { data: score, error: insertError } = await adminClient
       .from("deal_scores")

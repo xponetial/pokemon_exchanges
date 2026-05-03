@@ -1,4 +1,4 @@
-# Phase 2b — PriceCharting Integration
+# Phase 2c — Pricing Aggregator + Confidence Score
 
 ## Project Context
 
@@ -12,117 +12,141 @@ The admin (Mitch) searches eBay for undervalued cards, scores them with AI, and 
 
 ## The Problem This Phase Solves
 
-Right now the only pricing source is TCGplayer, which is good for raw/ungraded cards but weak for graded cards (PSA, BGS, CGC). TCGplayer doesn't track actual sold prices — it tracks listing prices.
+Right now `market_price` on an external listing is just whatever TCGplayer (or PriceCharting from Phase 2b) returned last. There's no blending of sources, no weighting by reliability, and no signal to Mitch about how trustworthy that price is.
 
-**PriceCharting** tracks real historical sold prices across eBay, and includes PSA population data for rarity adjustments. It's the industry standard anchor for graded card valuations.
+This phase introduces:
+1. A **weighted fair value formula** that blends multiple pricing sources
+2. A **confidence score** (0–100) that tells Mitch how much to trust the fair value
 
 ---
 
 ## What Already Exists
 
 ### Relevant files to read before starting:
-- `src/lib/tcgplayer/client.ts` — existing API client pattern to follow exactly
-- `src/lib/sourcing/search.ts` — where pricing enrichment happens, needs PriceCharting added
-- `src/lib/types/database.ts` — `ExternalListing` type, `external_listings` table schema
-- `src/lib/openai/scoring.ts` — OpenAI scoring receives `market_price` — this phase improves that input
-- `docs/SETUP.md` — add PriceCharting to this doc when done
-
-### Environment variables to add to `.env.local` and `.env.example`:
-```
-PRICECHARTING_API_KEY=
-```
+- `src/lib/tcgplayer/client.ts` — TCGplayer pricing
+- `src/lib/pricecharting/client.ts` — PriceCharting pricing (built in Phase 2b — read it)
+- `src/lib/openai/scoring.ts` — currently receives `market_price` as a single number, needs updating
+- `src/lib/sourcing/search.ts` — orchestrates all enrichment, needs to call aggregator
+- `src/lib/types/database.ts` — `external_listings` and `deal_scores` tables
+- `supabase/migrations/` — follow existing migration file naming convention
 
 ---
 
 ## What To Build
 
-### 1. `src/lib/pricecharting/client.ts` (new file)
+### 1. `src/lib/sourcing/pricingAggregator.ts` (new file)
 
-PriceCharting has a simple REST API: https://www.pricecharting.com/api/products
+**Weighted fair value formula:**
 
-**Key endpoints:**
-- Search: `GET https://www.pricecharting.com/api/products?q={cardName}&id={apiKey}`
-- Product prices: `GET https://www.pricecharting.com/api/product?id={productId}&api_key={apiKey}`
-
-**Price fields returned (all in cents — divide by 100):**
-- `loose-price` — raw/ungraded market price
-- `graded-price` — generic graded price
-- `psa-10-price`, `psa-9-price`, `psa-8-price` etc. — grade-specific prices
-- `cib-price` — complete in box
-
-**Export a `PriceChartingConfigError` class and these functions:**
-
-```ts
-// Search for a card and return the best match
-searchCard(cardName: string, setName?: string): Promise<PriceChartingProduct | null>
-
-// Get full pricing data for a known product ID
-getProductPrices(productId: string): Promise<PriceChartingPrices | null>
-
-// Convenience: get the right price for a given condition/grade
-getCardPrice(cardName: string, options: {
-  setName?: string
-  graded?: boolean
-  gradingCompany?: string  // "PSA", "BGS", "CGC"
-  grade?: string           // "10", "9.5", "9" etc
-}): Promise<{ price: number | null; productId: string | null }>
+For **Raw (ungraded) cards:**
+```
+fairValue = (TCGplayer * 0.50) + (PriceCharting * 0.30) + (eBay comps * 0.20)
 ```
 
-**Handle missing API key gracefully** — same pattern as `src/lib/tcgplayer/client.ts`. Export a `PriceChartingConfigError` class.
-
-**Cache tokens in memory** — PriceCharting doesn't use OAuth but rate-limit by caching results (Map<string, result> with a timestamp check, TTL 12 hours).
-
-### 2. Update `src/lib/sourcing/search.ts`
-
-After TCGplayer enrichment, also call PriceCharting and store the result. 
-
-For graded cards (`grading_company` is not null): prefer PriceCharting price as `market_price`.
-For raw cards: keep TCGplayer as `market_price`, store PriceCharting as secondary.
-
-Update the `external_listings` DB row with the best available `market_price`.
-
-### 3. Update `docs/SETUP.md`
-
-Add a **PriceCharting** section following the same format as other services:
-- What it does
-- Dashboard URL: https://www.pricecharting.com/api
-- Where to get the API key
-- Variable name: `PRICECHARTING_API_KEY`
-- Notes: free tier available, rate limits
-
-### 4. Update `.env.example`
-
-Add `PRICECHARTING_API_KEY=` under the TCGplayer section.
-
----
-
-## Auth Pattern (copy from existing routes)
-
-```ts
-const supabase = await createClient()
-const { data: { user } } = await supabase.auth.getUser()
-if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single()
-if (profile?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+For **Graded cards:**
 ```
+fairValue = (PriceCharting * 0.50) + (eBay comps * 0.30) + (PSA rarity modifier * 0.20)
+```
+
+Note: eBay comps (Phase 2e) and PSA modifier (deferred) may not be available yet — handle missing sources gracefully by redistributing weights.
+
+**Confidence score logic:**
+- Start at 100
+- Each missing source deducts points: TCGplayer missing = -30, PriceCharting missing = -30, eBay comps missing = -20
+- If sources disagree by more than 30%: deduct 20 points
+- Minimum 0, maximum 100
+
+**Export:**
+```ts
+interface AggregatedPrice {
+  fairValue: number
+  confidenceScore: number          // 0–100
+  sources: {
+    tcgplayer: number | null
+    pricecharting: number | null
+    ebayComps: number | null
+  }
+  isGraded: boolean
+  weights: Record<string, number>  // actual weights used
+}
+
+aggregatePrices(options: {
+  tcgplayerPrice: number | null
+  pricechartingPrice: number | null
+  ebayCompsPrice: number | null
+  isGraded: boolean
+}): AggregatedPrice
+```
+
+### 2. Database migration (new file in `supabase/migrations/`)
+
+Name it: `20260502000003_aggregated_prices.sql`
+
+```sql
+CREATE TABLE aggregated_prices (
+  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  external_listing_id uuid REFERENCES external_listings(id) ON DELETE CASCADE,
+  fair_value        numeric(10,2) NOT NULL,
+  confidence_score  integer NOT NULL CHECK (confidence_score BETWEEN 0 AND 100),
+  tcgplayer_price   numeric(10,2),
+  pricecharting_price numeric(10,2),
+  ebay_comps_price  numeric(10,2),
+  is_graded         boolean DEFAULT false,
+  weights           jsonb,
+  created_at        timestamptz DEFAULT now(),
+  UNIQUE (external_listing_id)
+);
+
+ALTER TABLE aggregated_prices ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "admins_all_aggregated_prices" ON aggregated_prices FOR ALL USING (
+  EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin')
+);
+```
+
+After writing this file, run: `npx supabase db push --include-all`
+
+### 3. Update `src/lib/types/database.ts`
+
+Add the `aggregated_prices` table type following the same pattern as existing tables.
+
+### 4. Update `src/lib/sourcing/search.ts`
+
+After all pricing sources are fetched, call `aggregatePrices()` and:
+- Save result to `aggregated_prices` table
+- Use `fairValue` as the `market_price` on `external_listings` (replaces raw TCGplayer price)
+- Pass `confidenceScore` to OpenAI scoring
+
+### 5. Update `src/lib/openai/scoring.ts`
+
+Add `confidenceScore` to the prompt so the AI knows how reliable the market price is:
+
+```
+Market Price: $245 (confidence: 88/100 — based on TCGplayer + PriceCharting)
+```
+
+### 6. Update `src/app/(admin)/admin/sourcing/[id]/page.tsx`
+
+Show the confidence score and source breakdown on the deal detail page. Add a small section under Pricing showing which sources contributed and their weights.
 
 ---
 
 ## Definition of Done
 
-- [ ] `src/lib/pricecharting/client.ts` exists with `searchCard`, `getProductPrices`, `getCardPrice`
-- [ ] `PRICECHARTING_API_KEY` missing returns `PriceChartingConfigError` gracefully
-- [ ] Graded card listings use PriceCharting price as `market_price` in the DB
-- [ ] `docs/SETUP.md` updated with PriceCharting section
-- [ ] `.env.example` updated with `PRICECHARTING_API_KEY`
+- [ ] `src/lib/sourcing/pricingAggregator.ts` exists with `aggregatePrices()`
+- [ ] `aggregated_prices` table exists in Supabase (migration applied)
+- [ ] `src/lib/types/database.ts` includes `AggregatedPrice` table type
+- [ ] Every scored listing has an `aggregated_prices` row
+- [ ] `market_price` on `external_listings` now reflects the weighted fair value
+- [ ] Deal detail page shows confidence score + source breakdown
+- [ ] Handles any combination of missing sources without crashing
 - [ ] `npm run build` passes with no type errors
 
 ---
 
 ## Testing
 
-1. `npm install` then `npm run dev -- -p 3002`
-2. Add `PRICECHARTING_API_KEY` to `.env.local` (get a free key at pricecharting.com/api)
-3. Go to `/admin/sourcing`, search for `"Charizard PSA 10"`
-4. Check `external_listings` in Supabase — graded results should have `market_price` populated from PriceCharting
-5. Without the API key, the yellow warning banner should appear and raw TCGplayer prices should still work
+1. `npm install` then `npm run dev -- -p 3003`
+2. Go to `/admin/sourcing`, search for `"Charizard PSA 10"`
+3. Score a deal — check the deal detail page at `/admin/sourcing/[id]`
+4. Should see: fair value, confidence score, which sources contributed
+5. Check `aggregated_prices` table in Supabase dashboard — should have a row per scored listing

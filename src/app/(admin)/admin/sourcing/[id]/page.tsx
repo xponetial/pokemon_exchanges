@@ -29,6 +29,12 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
 
   if (!listing) notFound()
 
+  const { data: aggPrice } = await adminClient
+    .from("aggregated_prices")
+    .select("*")
+    .eq("external_listing_id", id)
+    .single()
+
   const score = listing.deal_scores?.[0] ?? null
   const savings = listing.market_price ? listing.market_price - listing.price : null
 
@@ -91,7 +97,7 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 )}
               </div>
               <div>
-                <p className="text-xs text-text-secondary mb-0.5">Market Price (TCGplayer)</p>
+                <p className="text-xs text-text-secondary mb-0.5">Fair Value</p>
                 {listing.market_price ? (
                   <>
                     <p className="text-2xl font-bold text-text">{formatPriceDollars(listing.market_price)}</p>
@@ -106,6 +112,53 @@ export default async function DealDetailPage({ params }: { params: Promise<{ id:
                 )}
               </div>
             </div>
+
+            {aggPrice && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-text-muted uppercase tracking-widest">Price Sources</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-text-secondary">Confidence:</span>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                      aggPrice.confidence_score >= 70
+                        ? "bg-green-100 text-green-800"
+                        : aggPrice.confidence_score >= 40
+                        ? "bg-yellow-100 text-yellow-800"
+                        : "bg-red-100 text-red-800"
+                    }`}>
+                      {aggPrice.confidence_score}/100
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-text-secondary mb-0.5">TCGplayer</p>
+                    <p className="font-medium text-text">
+                      {aggPrice.tcgplayer_price != null ? formatPriceDollars(aggPrice.tcgplayer_price) : <span className="text-text-muted">—</span>}
+                    </p>
+                    {aggPrice.weights && typeof aggPrice.weights === "object" && !Array.isArray(aggPrice.weights) && (aggPrice.weights as Record<string, number>).tcgplayer != null && (
+                      <p className="text-xs text-text-muted">{Math.round(((aggPrice.weights as Record<string, number>).tcgplayer) * 100)}% weight</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-text-secondary mb-0.5">PriceCharting</p>
+                    <p className="font-medium text-text">
+                      {aggPrice.pricecharting_price != null ? formatPriceDollars(aggPrice.pricecharting_price) : <span className="text-text-muted">—</span>}
+                    </p>
+                    {aggPrice.weights && typeof aggPrice.weights === "object" && !Array.isArray(aggPrice.weights) && (aggPrice.weights as Record<string, number>).pricecharting != null && (
+                      <p className="text-xs text-text-muted">{Math.round(((aggPrice.weights as Record<string, number>).pricecharting) * 100)}% weight</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs text-text-secondary mb-0.5">eBay Comps</p>
+                    <p className="font-medium text-text">
+                      {aggPrice.ebay_comps_price != null ? formatPriceDollars(aggPrice.ebay_comps_price) : <span className="text-text-muted">—</span>}
+                    </p>
+                    <p className="text-xs text-text-muted italic">Phase 2e</p>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Seller */}

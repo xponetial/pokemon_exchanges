@@ -154,8 +154,14 @@ Agents: Sourcing, Pricing, Risk, Inventory, Market Trend.
 - Future: premium analytics, AI tools for users
 
 ## 10. Phased Roadmap
+
 - **Phase 1 — MVP Marketplace:** listings, buying/selling, Stripe payments
 - **Phase 2 — Admin Sourcing Tool:** external search, AI deal scoring, dashboard
+  - **Phase 2a — Card Normalization Service:** OpenAI parses messy eBay titles into structured card data (name, set, number, condition, grade) before any pricing lookup. Fixes broken TCGplayer matches on slang/misspelled titles.
+  - **Phase 2b — PriceCharting Integration:** Add PriceCharting as the anchor pricing source for graded cards. Covers actual sold prices + PSA population data. Becomes the 50% weight in the graded card fair value formula.
+  - **Phase 2c — Pricing Aggregator + Confidence Score:** Weighted fair value formula across all sources. Raw cards: 50% TCGplayer + 30% PriceCharting + 20% eBay comps. Graded: 50% PriceCharting + 30% eBay comps + 20% PSA rarity modifier. Outputs `fairValue` + `confidenceScore` (0–100) based on source count and agreement.
+  - **Phase 2d — Price Snapshots + Caching:** `price_snapshots` and `aggregated_prices` DB tables. Cache pricing data per source with TTLs (PriceCharting: 12–24h, TCGplayer: 6–12h, eBay: 5–15min). Prevents API hammering and enables price trend tracking over time.
+  - **Phase 2e — eBay Sold Comps:** Pull eBay *completed/sold* listings (not just active) as a third pricing input. Gives real transaction prices rather than asking prices, making the fair value formula more accurate.
 - **Phase 3 — AI Agent System:** continuous scanning, alerts
 - **Phase 4 — Semi-Autonomous Trading:** auto-listing, price optimization
 - **Phase 5 — Full AI Marketplace:** automated sourcing + selling

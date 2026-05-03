@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+/* ─── FB Marketplace × Pokemon Exchanges brand tokens ─── */
+@theme inline {
+  /* Primary blue (FB Marketplace) */
+  --color-primary:       #1877f2;
+  --color-primary-hover: #166fe5;
+  --color-primary-light: #e7f0fd;
+
+  /* Surfaces */
+  --color-surface:       #f0f2f5;
+  --color-surface-hover: #e4e6eb;
+  --color-white:         #ffffff;
+
+  /* Text */
+  --color-text:          #050505;
+  --color-text-secondary:#65676b;
+  --color-text-muted:    #8a8d91;
+
+  /* Borders */
+  --color-border:        #dddfe2;
+  --color-border-hover:  #bcc0c4;
+
+  /* Feedback */
+  --color-success:       #31a24c;
+  --color-warning:       #f7b928;
+  --color-danger:        #fa3e3e;
+  --color-danger-light:  #fff0f0;
+
+  /* Card grades */
+  --color-grade-psa:     #e31837;
+  --color-grade-bgs:     #003087;
+  --color-grade-cgc:     #7b2d8b;
+
+  /* Typography */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* ─── Base ─── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+}
+
+/* ─── Focus ring ─── */
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* ─── Scrollbar (webkit) ─── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-surface); }
+::-webkit-scrollbar-thumb { background: var(--color-border-hover); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }

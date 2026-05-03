@@ -206,6 +206,63 @@ RESEND_FROM_EMAIL=noreply@pokemonexchanges.com
 
 ---
 
+## Database Migrations
+
+Migrations are SQL files in `supabase/migrations/`. Every schema change (new tables, columns, indexes, RLS policies) lives here and must be committed to git.
+
+### First-time setup — link your Supabase project
+
+You only need to do this once per machine (or after cloning fresh):
+
+```bash
+npx supabase link --project-ref xhmhuyizhmwwbwikhycd
+```
+
+It will ask for your database password (find it in Supabase dashboard → Settings → Database → Database password).
+
+### Apply pending migrations to the database
+
+```bash
+npx supabase db push
+```
+
+If you see an error about migrations being out of order, add `--include-all`:
+
+```bash
+npx supabase db push --include-all
+```
+
+### Create a new migration
+
+```bash
+npx supabase migration new <description>
+```
+
+This creates a new timestamped file in `supabase/migrations/`. Write your SQL in it, then run `supabase db push` to apply it.
+
+### Check what migrations have been applied
+
+```bash
+npx supabase migration list
+```
+
+Shows which migrations are applied on the remote database vs. what exists locally.
+
+### After any schema change
+
+1. Create or edit the migration file in `supabase/migrations/`
+2. Run `npx supabase db push` to apply it
+3. Run `npx supabase gen types typescript --project-id xhmhuyizhmwwbwikhycd > src/lib/types/database.ts` to regenerate TypeScript types
+4. Commit both the migration file and the updated `database.ts`
+
+### Notes
+
+- Never edit a migration file that has already been applied — create a new one instead
+- The Supabase dashboard → Table Editor shows all tables live
+- If you ever need to reset the local dev DB: `npx supabase db reset` (dev only — never on production)
+
+---
+
 ## Security Rules
 
 - Never commit `.env.local` to git

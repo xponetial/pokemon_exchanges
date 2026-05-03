@@ -22,7 +22,14 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
-        Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>
+        Update: {
+          id?: string
+          email?: string
+          full_name?: string | null
+          avatar_url?: string | null
+          role?: "buyer" | "seller" | "admin"
+          updated_at?: string
+        }
       }
       sellers: {
         Row: {
@@ -45,7 +52,14 @@ export interface Database {
           total_sales?: number
           created_at?: string
         }
-        Update: Partial<Database["public"]["Tables"]["sellers"]["Insert"]>
+        Update: {
+          stripe_account_id?: string | null
+          stripe_onboarding_complete?: boolean
+          display_name?: string
+          bio?: string | null
+          rating?: number
+          total_sales?: number
+        }
       }
       cards: {
         Row: {
@@ -74,7 +88,17 @@ export interface Database {
           tcg_player_id?: string | null
           created_at?: string
         }
-        Update: Partial<Database["public"]["Tables"]["cards"]["Insert"]>
+        Update: {
+          name?: string
+          set_name?: string
+          set_code?: string
+          number?: string
+          rarity?: string | null
+          hp?: string | null
+          types?: string[] | null
+          image_url?: string | null
+          tcg_player_id?: string | null
+        }
       }
       listings: {
         Row: {
@@ -117,7 +141,23 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
-        Update: Partial<Database["public"]["Tables"]["listings"]["Insert"]>
+        Update: {
+          card_id?: string | null
+          card_name?: string | null
+          set_name?: string | null
+          card_number?: string | null
+          condition?: "Graded" | "Raw"
+          grading_company?: string | null
+          grade?: string | null
+          raw_condition?: string | null
+          price?: number
+          title?: string
+          description?: string | null
+          images?: string[]
+          status?: "active" | "sold" | "inactive" | "removed"
+          views?: number
+          updated_at?: string
+        }
       }
       orders: {
         Row: {
@@ -158,7 +198,16 @@ export interface Database {
           created_at?: string
           updated_at?: string
         }
-        Update: Partial<Database["public"]["Tables"]["orders"]["Insert"]>
+        Update: {
+          stripe_payment_intent_id?: string | null
+          stripe_transfer_id?: string | null
+          status?: "pending" | "payment_captured" | "shipped" | "delivered" | "complete" | "disputed" | "refunded" | "cancelled"
+          escrow_released_at?: string | null
+          tracking_number?: string | null
+          tracking_carrier?: string | null
+          notes?: string | null
+          updated_at?: string
+        }
       }
       order_items: {
         Row: {
@@ -175,7 +224,10 @@ export interface Database {
           price: number
           quantity?: number
         }
-        Update: Partial<Database["public"]["Tables"]["order_items"]["Insert"]>
+        Update: {
+          price?: number
+          quantity?: number
+        }
       }
     }
     Views: Record<string, never>

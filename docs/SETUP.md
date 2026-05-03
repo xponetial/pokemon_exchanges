@@ -7,12 +7,13 @@ All credentials go in `.env.local` (never committed to git). Use `.env.example` 
 
 ## Phase 2 — Activating the Sourcing Engine
 
-The sourcing engine is fully built and wired up. The database tables are live. To turn it on, you just need to fill in three API keys in `.env.local`:
+The sourcing engine is fully built and wired up. The database tables are live. To turn it on, you just need to fill in four API keys in `.env.local`:
 
 | Service | Variable(s) | What it unlocks |
 |---|---|---|
 | eBay | `EBAY_APP_ID`, `EBAY_CLIENT_SECRET` | Search eBay for undervalued cards |
-| TCGplayer | `TCGPLAYER_CLIENT_ID`, `TCGPLAYER_CLIENT_SECRET` | Pull real market prices for deal scoring |
+| TCGplayer | `TCGPLAYER_CLIENT_ID`, `TCGPLAYER_CLIENT_SECRET` | Pull real market prices for raw card deal scoring |
+| PriceCharting | `PRICECHARTING_API_KEY` | Graded card sold-price history (PSA, BGS, CGC) |
 | OpenAI | `OPENAI_API_KEY` | AI deal scoring (value, risk, authenticity, recommendation) |
 
 Until a key is added, that feature shows a yellow warning banner in the admin UI pointing back to this doc — nothing breaks.
@@ -152,6 +153,28 @@ TCGPLAYER_CLIENT_SECRET=<your Client Secret>
 
 ---
 
+### PriceCharting API (Sold Price History)
+
+**What it does:** Pulls real historical sold prices for graded Pokémon cards (PSA, BGS, CGC). Used as the primary `market_price` source for graded listings — TCGplayer is used for raw cards.
+
+**Dashboard:** https://www.pricecharting.com/api
+
+**Where to find keys:**
+- Create a free account at pricecharting.com
+- Go to the API page and request an API key (free tier available)
+
+**Variables:**
+```
+PRICECHARTING_API_KEY=<your API key>
+```
+
+**Notes:**
+- Free tier is sufficient for the sourcing engine's volume
+- Results are cached in memory for 12 hours to stay within rate limits — no additional configuration needed
+- Without this key, graded card listings fall back to TCGplayer pricing; a yellow warning banner appears in the admin UI
+
+---
+
 ### Resend (Transactional Email)
 
 **What it does:** Sends order confirmations, seller payout notifications, and admin alerts.
@@ -220,6 +243,9 @@ EBAY_OAUTH_TOKEN=
 # TCGplayer
 TCGPLAYER_CLIENT_ID=
 TCGPLAYER_CLIENT_SECRET=
+
+# PriceCharting
+PRICECHARTING_API_KEY=
 
 # Resend
 RESEND_API_KEY=

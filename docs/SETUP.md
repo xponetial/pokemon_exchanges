@@ -9,6 +9,8 @@ All credentials go in `.env.local` (never committed to git). Use `.env.example` 
 
 The sourcing engine is fully built and wired up. The database tables are live. To turn it on, you just need to fill in four API keys in `.env.local`:
 
+> **TODO (Mitch):** `PRICECHARTING_API_KEY` has not been added yet. Get a free key at https://www.pricecharting.com/api and add it to `.env.local` and Vercel. Until then, graded card listings fall back to TCGplayer pricing and a yellow banner appears in the admin UI.
+
 | Service | Variable(s) | What it unlocks |
 |---|---|---|
 | eBay | `EBAY_APP_ID`, `EBAY_CLIENT_SECRET` | Search eBay for undervalued cards |

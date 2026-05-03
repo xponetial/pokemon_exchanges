@@ -5,6 +5,28 @@ All credentials go in `.env.local` (never committed to git). Use `.env.example` 
 
 ---
 
+## Phase 2 — Activating the Sourcing Engine
+
+The sourcing engine is fully built and wired up. The database tables are live. To turn it on, you just need to fill in three API keys in `.env.local`:
+
+| Service | Variable(s) | What it unlocks |
+|---|---|---|
+| eBay | `EBAY_APP_ID`, `EBAY_CLIENT_SECRET` | Search eBay for undervalued cards |
+| TCGplayer | `TCGPLAYER_CLIENT_ID`, `TCGPLAYER_CLIENT_SECRET` | Pull real market prices for deal scoring |
+| OpenAI | `OPENAI_API_KEY` | AI deal scoring (value, risk, authenticity, recommendation) |
+
+Until a key is added, that feature shows a yellow warning banner in the admin UI pointing back to this doc — nothing breaks.
+
+**Steps to activate:**
+1. Get the keys from each service dashboard (see their sections below)
+2. Add them to `.env.local` in the project root
+3. Restart the dev server: `npm run dev`
+4. Go to `/admin/sourcing`, search for a card, and hit **Score with AI**
+
+For production, also add the keys in Vercel → Settings → Environment Variables (see [Vercel](#vercel) section).
+
+---
+
 ## How to Apply a Change
 
 1. Open `.env.local` in the project root

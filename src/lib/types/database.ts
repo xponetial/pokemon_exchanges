@@ -352,6 +352,31 @@ export interface Database {
           priority?: "low" | "normal" | "high"
         }
       }
+      price_snapshots: {
+        Row: {
+          id: string
+          card_key: string
+          source: "tcgplayer" | "pricecharting" | "ebay_comps"
+          price: number | null
+          raw_data: Json | null
+          expires_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          card_key: string
+          source: "tcgplayer" | "pricecharting" | "ebay_comps"
+          price?: number | null
+          raw_data?: Json | null
+          expires_at: string
+          created_at?: string
+        }
+        Update: {
+          price?: number | null
+          raw_data?: Json | null
+          expires_at?: string
+        }
+      }
       sourced_inventory: {
         Row: {
           id: string
@@ -432,6 +457,7 @@ export type ExternalListing = Database["public"]["Tables"]["external_listings"][
 export type DealScore = Database["public"]["Tables"]["deal_scores"]["Row"]
 export type WatchlistItem = Database["public"]["Tables"]["watchlist"]["Row"]
 export type SourcedInventory = Database["public"]["Tables"]["sourced_inventory"]["Row"]
+export type PriceSnapshot = Database["public"]["Tables"]["price_snapshots"]["Row"]
 
 export type ListingWithSeller = Listing & { sellers: Pick<Seller, "display_name" | "rating"> }
 export type ExternalListingWithScore = ExternalListing & { deal_scores: DealScore[] }

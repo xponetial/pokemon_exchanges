@@ -1,6 +1,6 @@
 import { createClient, createAdminClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
-import { Lock, Search, Bookmark, Package, TrendingUp } from "lucide-react"
+import { Lock, Search, Bookmark, Package, TrendingUp, Database } from "lucide-react"
 import Link from "next/link"
 import type { Metadata } from "next"
 
@@ -26,18 +26,26 @@ export default async function AdminPage() {
 
   const adminClient = await createAdminClient()
 
-  // Stats
   const [
     { count: newDeals },
     { count: watchlistCount },
     { count: inventoryCount },
     { count: scoredDeals },
+    { count: totalSnapshots },
+    { count: activeSnapshots },
   ] = await Promise.all([
     adminClient.from("external_listings").select("*", { count: "exact", head: true }).eq("status", "new"),
     adminClient.from("watchlist").select("*", { count: "exact", head: true }),
     adminClient.from("sourced_inventory").select("*", { count: "exact", head: true }).neq("status", "sold"),
     adminClient.from("deal_scores").select("*", { count: "exact", head: true }).gte("overall_score", 75),
+    adminClient.from("price_snapshots").select("*", { count: "exact", head: true }),
+    adminClient.from("price_snapshots").select("*", { count: "exact", head: true }).gt("expires_at", new Date().toISOString()),
   ])
+
+  const cacheHitRate =
+    totalSnapshots && totalSnapshots > 0
+      ? Math.round(((activeSnapshots ?? 0) / totalSnapshots) * 100)
+      : 0
 
   const stats = [
     { label: "New Deals Found",    value: newDeals ?? 0,      icon: Search,    href: "/admin/sourcing" },
@@ -51,8 +59,8 @@ export default async function AdminPage() {
       <h1 className="text-2xl font-bold text-text mb-1">Admin Dashboard</h1>
       <p className="text-text-secondary text-sm mb-8">AI Sourcing Engine — Phase 2</p>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+      {/* Sourcing Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {stats.map(({ label, value, icon: Icon, href }) => (
           <Link
             key={label}
@@ -66,6 +74,21 @@ export default async function AdminPage() {
             <p className="text-2xl font-bold text-text">{value}</p>
           </Link>
         ))}
+      </div>
+
+      {/* Price Cache Stats */}
+      <div className="bg-white rounded border border-border p-4 mb-10 flex items-center gap-6">
+        <Database className="w-5 h-5 text-primary shrink-0" />
+        <div>
+          <p className="text-xs text-text-secondary mb-0.5">Price Cache</p>
+          <p className="text-sm font-semibold text-text">
+            {activeSnapshots ?? 0} active / {totalSnapshots ?? 0} total
+            <span className="ml-2 text-text-secondary font-normal">({cacheHitRate}% fresh)</span>
+          </p>
+        </div>
+        <p className="text-xs text-text-secondary ml-auto">
+          TCGplayer 6h · PriceCharting 12h · eBay 15m
+        </p>
       </div>
 
       {/* Quick actions */}

@@ -15,6 +15,16 @@ See [docs/PRD.md](docs/PRD.md) for the full product requirements document.
 ## Tech Stack
 Next.js + Tailwind · Supabase (Postgres + Auth) · Stripe Connect · OpenAI · Vercel
 
+## Commands
+
+```bash
+npm run dev          # start dev server
+npm run build        # production build + type check
+npm test             # run unit tests (no API keys needed)
+npm run test:watch   # re-run tests on file save
+npm run lint         # lint
+```
+
 ## Dev Seed Data
 
 Populate the dev database with 20 fake Pokemon card listings (real card images from the Pokemon TCG API):

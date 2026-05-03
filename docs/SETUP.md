@@ -9,11 +9,13 @@ All credentials go in `.env.local` (never committed to git). Use `.env.example` 
 
 The sourcing engine is fully built and wired up. The database tables are live. To turn it on, you just need to fill in four API keys in `.env.local`:
 
+> **TODO (Mitch):** `PRICECHARTING_API_KEY` has not been added yet. Get a free key at https://www.pricecharting.com/api and add it to `.env.local` and Vercel. Until then, graded card listings fall back to TCGplayer pricing and a yellow banner appears in the admin UI.
+
 | Service | Variable(s) | What it unlocks |
 |---|---|---|
 | eBay | `EBAY_APP_ID`, `EBAY_CLIENT_SECRET` | Search eBay for undervalued cards |
-| TCGplayer | `TCGPLAYER_CLIENT_ID`, `TCGPLAYER_CLIENT_SECRET` | Pull real market prices for deal scoring |
-| PriceCharting | `PRICECHARTING_API_KEY` | Historical sold pricing, especially for graded cards |
+| TCGplayer | `TCGPLAYER_CLIENT_ID`, `TCGPLAYER_CLIENT_SECRET` | Pull real market prices for raw card deal scoring |
+| PriceCharting | `PRICECHARTING_API_KEY` | Graded card sold-price history (PSA, BGS, CGC) |
 | OpenAI | `OPENAI_API_KEY` | AI deal scoring (value, risk, authenticity, recommendation) |
 
 Until a key is added, that feature shows a yellow warning banner in the admin UI pointing back to this doc — nothing breaks.
@@ -155,13 +157,13 @@ TCGPLAYER_CLIENT_SECRET=<your Client Secret>
 
 ### PriceCharting API (Sold Price History)
 
-**What it does:** Adds sold-price valuation data, especially for graded cards where listing-price-only sources are weaker.
+**What it does:** Pulls real historical sold prices for graded Pokémon cards (PSA, BGS, CGC). Used as the primary `market_price` source for graded listings — TCGplayer is used for raw cards.
 
 **Dashboard:** https://www.pricecharting.com/api
 
 **Where to find keys:**
-- Create or sign into your PriceCharting account
-- Open the API page and generate/copy your API key
+- Create a free account at pricecharting.com
+- Go to the API page and request an API key (free tier available)
 
 **Variables:**
 ```
@@ -169,8 +171,9 @@ PRICECHARTING_API_KEY=<your API key>
 ```
 
 **Notes:**
-- Free tier is available
-- API usage is rate-limited, so this app caches results to reduce repeated calls
+- Free tier is sufficient for the sourcing engine's volume
+- Results are cached in memory for 12 hours to stay within rate limits — no additional configuration needed
+- Without this key, graded card listings fall back to TCGplayer pricing; a yellow warning banner appears in the admin UI
 
 ---
 

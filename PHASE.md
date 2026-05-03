@@ -1,4 +1,4 @@
-# Phase 2a — Card Normalization Service
+# Phase 2b — PriceCharting Integration
 
 ## Project Context
 
@@ -12,80 +12,87 @@ The admin (Mitch) searches eBay for undervalued cards, scores them with AI, and 
 
 ## The Problem This Phase Solves
 
-eBay listing titles are messy. Examples:
-- `"🔥 ZARD HOLO PSA?? BASE 4/102 WOTC GEM MINT 🔥"`
-- `"1999 charizard base set psa 10 vintage pokemon card"`
-- `"Vintage Pokemon Pikachu yellow cheeks base set GRADED"`
+Right now the only pricing source is TCGplayer, which is good for raw/ungraded cards but weak for graded cards (PSA, BGS, CGC). TCGplayer doesn't track actual sold prices — it tracks listing prices.
 
-When we try to look up market prices on TCGplayer using these raw titles, the search fails or returns wrong results.
-
-**The fix:** Before hitting any pricing API, use OpenAI to parse the raw title into structured card data.
+**PriceCharting** tracks real historical sold prices across eBay, and includes PSA population data for rarity adjustments. It's the industry standard anchor for graded card valuations.
 
 ---
 
 ## What Already Exists
 
 ### Relevant files to read before starting:
-- `src/lib/openai/scoring.ts` — existing OpenAI integration pattern to follow
-- `src/lib/tcgplayer/client.ts` — calls `getMarketPrice(cardName, setName)` — needs normalized data
-- `src/lib/sourcing/search.ts` — orchestrates eBay search + TCGplayer enrichment — needs normalization injected
-- `src/lib/ebay/client.ts` — returns `EbayListing[]` with raw `title` field
-- `src/lib/types/database.ts` — `ExternalListing` type has `card_name`, `set_name`, `card_number`, `condition`, `grading_company`, `grade` fields
+- `src/lib/tcgplayer/client.ts` — existing API client pattern to follow exactly
+- `src/lib/sourcing/search.ts` — where pricing enrichment happens, needs PriceCharting added
+- `src/lib/types/database.ts` — `ExternalListing` type, `external_listings` table schema
+- `src/lib/openai/scoring.ts` — OpenAI scoring receives `market_price` — this phase improves that input
+- `docs/SETUP.md` — add PriceCharting to this doc when done
 
-### Environment variables already in `.env.local`:
-- `OPENAI_API_KEY` — used for normalization
+### Environment variables to add to `.env.local` and `.env.example`:
+```
+PRICECHARTING_API_KEY=
+```
 
 ---
 
 ## What To Build
 
-### 1. `src/lib/sourcing/normalization.ts` (new file)
+### 1. `src/lib/pricecharting/client.ts` (new file)
 
-A function that takes a raw eBay listing title and returns structured card data using OpenAI.
+PriceCharting has a simple REST API: https://www.pricecharting.com/api/products
 
-**Input:** Raw title string (e.g. `"ZARD HOLO PSA 10 BASE SET 4/102"`)
+**Key endpoints:**
+- Search: `GET https://www.pricecharting.com/api/products?q={cardName}&id={apiKey}`
+- Product prices: `GET https://www.pricecharting.com/api/product?id={productId}&api_key={apiKey}`
 
-**Output:**
+**Price fields returned (all in cents — divide by 100):**
+- `loose-price` — raw/ungraded market price
+- `graded-price` — generic graded price
+- `psa-10-price`, `psa-9-price`, `psa-8-price` etc. — grade-specific prices
+- `cib-price` — complete in box
+
+**Export a `PriceChartingConfigError` class and these functions:**
+
 ```ts
-interface NormalizedCard {
-  card_name: string | null        // e.g. "Charizard"
-  set_name: string | null         // e.g. "Base Set"
-  card_number: string | null      // e.g. "4/102"
-  condition: string | null        // "Graded" or "Raw"
-  grading_company: string | null  // "PSA", "BGS", "CGC", "SGC" or null
-  grade: string | null            // "10", "9", "8" etc or null
-  raw_condition: string | null    // "Near Mint", "Lightly Played" etc if raw
-  confidence: number              // 0-100, how confident the AI is
-}
+// Search for a card and return the best match
+searchCard(cardName: string, setName?: string): Promise<PriceChartingProduct | null>
+
+// Get full pricing data for a known product ID
+getProductPrices(productId: string): Promise<PriceChartingPrices | null>
+
+// Convenience: get the right price for a given condition/grade
+getCardPrice(cardName: string, options: {
+  setName?: string
+  graded?: boolean
+  gradingCompany?: string  // "PSA", "BGS", "CGC"
+  grade?: string           // "10", "9.5", "9" etc
+}): Promise<{ price: number | null; productId: string | null }>
 ```
 
-**Requirements:**
-- Use `gpt-4o-mini` with `response_format: { type: "json_object" }`
-- Handle missing `OPENAI_API_KEY` gracefully — export an `OpenAIConfigError` class (already exists in `src/lib/openai/scoring.ts`, import from there)
-- If OpenAI is not configured, return all nulls with confidence 0 rather than throwing — normalization is best-effort
-- Cache results in memory (a simple `Map<string, NormalizedCard>`) to avoid re-normalizing the same title in one session
+**Handle missing API key gracefully** — same pattern as `src/lib/tcgplayer/client.ts`. Export a `PriceChartingConfigError` class.
+
+**Cache tokens in memory** — PriceCharting doesn't use OAuth but rate-limit by caching results (Map<string, result> with a timestamp check, TTL 12 hours).
 
 ### 2. Update `src/lib/sourcing/search.ts`
 
-After saving eBay results to the DB, call `normalizeTitle()` for each listing that has no `card_name` yet, then update the DB row with the normalized fields.
+After TCGplayer enrichment, also call PriceCharting and store the result. 
 
-Currently `card_name`, `set_name` etc. are always `null` after an eBay search. This phase fixes that.
+For graded cards (`grading_company` is not null): prefer PriceCharting price as `market_price`.
+For raw cards: keep TCGplayer as `market_price`, store PriceCharting as secondary.
 
-### 3. Update `src/lib/tcgplayer/client.ts`
+Update the `external_listings` DB row with the best available `market_price`.
 
-`getMarketPrice()` currently accepts `cardName` and `setName`. No changes needed to the signature — normalization happens upstream. But add a note comment explaining the input should be normalized before calling.
+### 3. Update `docs/SETUP.md`
 
-### 4. `src/app/api/sourcing/normalize/route.ts` (new file)
+Add a **PriceCharting** section following the same format as other services:
+- What it does
+- Dashboard URL: https://www.pricecharting.com/api
+- Where to get the API key
+- Variable name: `PRICECHARTING_API_KEY`
+- Notes: free tier available, rate limits
 
-A test endpoint for Mitch to manually normalize a title:
+### 4. Update `.env.example`
 
-```
-POST /api/sourcing/normalize
-Body: { "title": "ZARD PSA 10 BASE SET" }
-Response: { normalized: NormalizedCard }
-```
-
-Admin-only (same auth pattern as other `/api/sourcing/` routes).
+Add `PRICECHARTING_API_KEY=` under the TCGplayer section.
 
 ---
 
@@ -101,31 +108,21 @@ if (profile?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, 
 
 ---
 
-## OpenAI Pattern (copy from `src/lib/openai/scoring.ts`)
-
-- Use `fetch` directly to `https://api.openai.com/v1/chat/completions`
-- Model: `gpt-4o-mini`
-- `response_format: { type: "json_object" }`
-- `temperature: 0.1` (low — we want deterministic parsing)
-- Always wrap in try/catch
-
----
-
 ## Definition of Done
 
-- [ ] `normalizeTitle(title: string): Promise<NormalizedCard>` exists in `src/lib/sourcing/normalization.ts`
-- [ ] After an eBay search, every saved listing has `card_name` populated (where AI can determine it)
-- [ ] TCGplayer enrichment uses the normalized `card_name` + `set_name` — not the raw eBay title
-- [ ] `POST /api/sourcing/normalize` works and returns structured data
-- [ ] Missing `OPENAI_API_KEY` returns nulls gracefully, does not crash
+- [ ] `src/lib/pricecharting/client.ts` exists with `searchCard`, `getProductPrices`, `getCardPrice`
+- [ ] `PRICECHARTING_API_KEY` missing returns `PriceChartingConfigError` gracefully
+- [ ] Graded card listings use PriceCharting price as `market_price` in the DB
+- [ ] `docs/SETUP.md` updated with PriceCharting section
+- [ ] `.env.example` updated with `PRICECHARTING_API_KEY`
 - [ ] `npm run build` passes with no type errors
 
 ---
 
 ## Testing
 
-1. `npm install` then `npm run dev -- -p 3001`
-2. Log in as admin, go to `/admin/sourcing`
-3. Search for `"Charizard Base Set"`
-4. Check the DB (`external_listings` table in Supabase) — `card_name` should now be `"Charizard"`, `set_name` `"Base Set"` etc.
-5. Test the normalize endpoint directly: `POST /api/sourcing/normalize` with body `{"title": "1999 ZARD HOLO PSA 10 BASE 4/102"}`
+1. `npm install` then `npm run dev -- -p 3002`
+2. Add `PRICECHARTING_API_KEY` to `.env.local` (get a free key at pricecharting.com/api)
+3. Go to `/admin/sourcing`, search for `"Charizard PSA 10"`
+4. Check `external_listings` in Supabase — graded results should have `market_price` populated from PriceCharting
+5. Without the API key, the yellow warning banner should appear and raw TCGplayer prices should still work

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient, createAdminClient } from "@/lib/supabase/server"
 import { scoreDeal, OpenAIConfigError } from "@/lib/openai/scoring"
+import { sendDealAlert, ResendConfigError } from "@/lib/resend/client"
 import { z } from "zod"
 
 const schema = z.object({ externalListingId: z.string().uuid() })
@@ -64,6 +65,21 @@ export async function POST(req: Request) {
       .from("external_listings")
       .update({ status: "scored" })
       .eq("id", listing.id)
+
+    // Send email alert for high-score deals (non-blocking)
+    if (scoreResult.overall_score >= 75) {
+      sendDealAlert({
+        title: listing.title,
+        price: listing.price,
+        marketPrice: listing.market_price,
+        dealScore: scoreResult.overall_score,
+        recommendation: scoreResult.recommendation,
+        url: listing.url,
+        listingId: listing.id,
+      }).catch((err) => {
+        if (!(err instanceof ResendConfigError)) console.error("Deal alert email failed:", err)
+      })
+    }
 
     return NextResponse.json({ score })
   } catch (err) {

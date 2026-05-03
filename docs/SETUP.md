@@ -190,11 +190,14 @@ PRICECHARTING_API_KEY=<your API key>
 ```
 RESEND_API_KEY=re_...
 RESEND_FROM_EMAIL=noreply@pokemonexchanges.com
+ADMIN_EMAIL=your@email.com
 ```
 
 **Notes:**
 - Verify your sending domain (`pokemonexchanges.com`) in the Resend dashboard under Domains
 - Without domain verification, emails send from Resend's shared domain and may land in spam
+- `ADMIN_EMAIL` is where deal alerts are sent — set this to your email address
+- Deal alerts fire automatically when a scored deal hits 75+ overall score
 
 ---
 
